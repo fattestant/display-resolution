@@ -25,3 +25,9 @@ set statusline=%F%m%r%w\ [POS=%l,%v][%p%%]
 set showcmd
 set tabstop=4
 set wildmenu
+
+inoremap ( ()<LEFT>
+inoremap [ []<LEFT>
+inoremap { {	}<UP><RIGHT>
+inoremap " ""<LEFT>
+inoremap ' ''<LEFT>
