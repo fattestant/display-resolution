@@ -25,6 +25,7 @@ set statusline=%F%m%r%w\ [POS=%l,%v][%p%%]
 set showcmd
 set tabstop=4
 set wildmenu
+colorscheme delek
 
 inoremap ( ()<LEFT>
 inoremap [ []<LEFT>
