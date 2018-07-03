@@ -17,13 +17,9 @@
 typedef	int	SOCKET;
 #endif
 
-#define RECV_BUFF_LENGTH	10240
-
-struct PackageHead
-{
-	int		iLength;
-	int		iProtocol;
-};
+#define RECV_BUFF_LENGTH		65536
+#define PACKAGE_HEAD_TYPE		short
+#define PACKAGE_HEAD_LENGTH		((int)sizeof(PACKAGE_HEAD_TYPE))
 
 struct SendData
 {
@@ -50,7 +46,7 @@ struct MyNetwork
 	char				pRecvBuffer[RECV_BUFF_LENGTH];
 	char				pDataBuffer[RECV_BUFF_LENGTH];
 	int					iDataLength;
-	char*				pNetCallback;
+	const char*			pNetCallback;
 	struct SendData*	pSendList;
 	struct SendData*	pSendListLast;
 	lua_State*			pLuaState;
@@ -60,7 +56,7 @@ struct MyNetwork
 	_G["network_callback_scene"] = function (pData) print(pData) end
 	initMyNetwork("network_callback_scene")
 */
-static struct MyNetwork* initMyNetwork(lua_State* L, char* pCallback)
+static struct MyNetwork* initMyNetwork(lua_State* L, const char* pCallback)
 {
 	struct MyNetwork* pNet = (struct MyNetwork*)malloc(sizeof(struct MyNetwork));
 	if (pNet)
@@ -84,7 +80,7 @@ static struct MyNetwork* initMyNetwork(lua_State* L, char* pCallback)
 
 int to_lua_initMyNetwork(lua_State* L)
 {
-	char* pCallback = lua_tostring(L, 1);
+	const char* pCallback = lua_tostring(L, 1);
 	struct MyNetwork* pNet = initMyNetwork(L, pCallback);
 	lua_pushlightuserdata(L, pNet);
 
@@ -182,12 +178,13 @@ static void sendData(struct MyNetwork* pNet, const char* pBuffer, int iLength)
 	struct SendData* pSendData = (struct SendData*)malloc(sizeof(struct SendData));
 	if (pSendData)
 	{
-		pSendData->iLength = iLength;
+		pSendData->iLength = iLength + PACKAGE_HEAD_LENGTH;
 		pSendData->pNext = NULL;
-		pSendData->pData = (char*)malloc(iLength);
+		pSendData->pData = (char*)malloc(pSendData->iLength);
 		if (pSendData->pData)
 		{
-			memcpy(pSendData->pData, pBuffer, iLength);
+			memcpy(pSendData->pData, &iLength, PACKAGE_HEAD_LENGTH);
+			memcpy(pSendData->pData + PACKAGE_HEAD_LENGTH, pBuffer, iLength);
 			if (NULL == pNet->pSendList)
 			{
 				pNet->pSendList = pSendData;
@@ -220,9 +217,9 @@ static void processData(struct MyNetwork *pNet, char* pBuffer, int iLength)
 	int		iBufferOffset = 0;
 	while (iBufferOffset < iLength)
 	{
-		if (pNet->iDataLength < (int)sizeof(struct PackageHead))
+		if (pNet->iDataLength < PACKAGE_HEAD_LENGTH)
 		{
-			if (iLength - iBufferOffset < (int)sizeof(struct PackageHead) - pNet->iDataLength)
+			if (iLength - iBufferOffset <= PACKAGE_HEAD_LENGTH - pNet->iDataLength)
 			{
 				memcpy(pNet->pDataBuffer + pNet->iDataLength, pBuffer + iBufferOffset, iLength - iBufferOffset);
 				pNet->iDataLength += iLength - iBufferOffset;
@@ -230,33 +227,28 @@ static void processData(struct MyNetwork *pNet, char* pBuffer, int iLength)
 			}
 			else
 			{
-				memcpy(pNet->pDataBuffer + pNet->iDataLength, pBuffer + iBufferOffset, sizeof(struct PackageHead) - pNet->iDataLength);
-				iBufferOffset += sizeof(struct PackageHead) - pNet->iDataLength;
-				pNet->iDataLength = sizeof(struct PackageHead);
+				memcpy(pNet->pDataBuffer + pNet->iDataLength, pBuffer + iBufferOffset, PACKAGE_HEAD_LENGTH - pNet->iDataLength);
+				iBufferOffset += PACKAGE_HEAD_LENGTH - pNet->iDataLength;
+				pNet->iDataLength = PACKAGE_HEAD_LENGTH;
 			}
 		}
-		int		iPackageLength = ((struct PackageHead*)pNet->pDataBuffer)->iLength;
-		if (iPackageLength > RECV_BUFF_LENGTH || iPackageLength <= 0)
+
+		int		iPackageLength = (int)((PACKAGE_HEAD_TYPE*)pNet->pDataBuffer);
+		if (iPackageLength <= 0 || iPackageLength > RECV_BUFF_LENGTH - PACKAGE_HEAD_LENGTH)
 		{
 			pNet->iDataLength = 0;
 			return; //package length error
 		}
-		if (iLength - iBufferOffset < iPackageLength - (int)sizeof(struct PackageHead))
+		if (iLength - iBufferOffset < iPackageLength)
 		{
-			if (iLength > iBufferOffset)
-			{
-				memcpy(pNet->pDataBuffer + pNet->iDataLength, pBuffer + iBufferOffset, iLength - iBufferOffset);
-				pNet->iDataLength += iLength - iBufferOffset;
-			}
+			memcpy(pNet->pDataBuffer + pNet->iDataLength, pBuffer + iBufferOffset, iLength - iBufferOffset);
+			pNet->iDataLength += iLength - iBufferOffset;
 			return; //data is not enough
 		}
 		else
 		{
-			if (iPackageLength > (int)sizeof(struct PackageHead))
-			{
-				memcpy(pNet->pDataBuffer + pNet->iDataLength, pBuffer + iBufferOffset, iPackageLength - sizeof(struct PackageHead));
-				iBufferOffset += iPackageLength - sizeof(struct PackageHead);
-			}
+			memcpy(pNet->pDataBuffer + pNet->iDataLength, pBuffer + iBufferOffset, iPackageLength - PACKAGE_HEAD_LENGTH);
+			iBufferOffset += iPackageLength - PACKAGE_HEAD_LENGTH;
 			pNet->iDataLength = 0;
 
 			lua_getglobal(pNet->pLuaState, "_G");
@@ -265,7 +257,7 @@ static void processData(struct MyNetwork *pNet, char* pBuffer, int iLength)
 				lua_getfield(pNet->pLuaState, -1, pNet->pNetCallback);
 				if (lua_isfunction(pNet->pLuaState, -1))
 				{
-					lua_pushlstring(pNet->pLuaState, pNet->pDataBuffer, iPackageLength);
+					lua_pushlstring(pNet->pLuaState, pNet->pDataBuffer + PACKAGE_HEAD_LENGTH, iPackageLength - PACKAGE_HEAD_LENGTH);
 					lua_pcall(pNet->pLuaState, 1, 0, 0);
 				}
 			}
