@@ -233,13 +233,13 @@ static void processData(struct MyNetwork *pNet, char* pBuffer, int iLength)
 			}
 		}
 
-		int		iPackageLength = (int)((PACKAGE_HEAD_TYPE*)pNet->pDataBuffer);
+		int		iPackageLength = (int)*((PACKAGE_HEAD_TYPE*)pNet->pDataBuffer);
 		if (iPackageLength <= 0 || iPackageLength > RECV_BUFF_LENGTH - PACKAGE_HEAD_LENGTH)
 		{
 			pNet->iDataLength = 0;
 			return; //package length error
 		}
-		if (iLength - iBufferOffset < iPackageLength)
+		if (iLength - iBufferOffset < iPackageLength + PACKAGE_HEAD_LENGTH - pNet->iDataLength)
 		{
 			memcpy(pNet->pDataBuffer + pNet->iDataLength, pBuffer + iBufferOffset, iLength - iBufferOffset);
 			pNet->iDataLength += iLength - iBufferOffset;
@@ -247,20 +247,20 @@ static void processData(struct MyNetwork *pNet, char* pBuffer, int iLength)
 		}
 		else
 		{
-			memcpy(pNet->pDataBuffer + pNet->iDataLength, pBuffer + iBufferOffset, iPackageLength - PACKAGE_HEAD_LENGTH);
-			iBufferOffset += iPackageLength - PACKAGE_HEAD_LENGTH;
+			memcpy(pNet->pDataBuffer + pNet->iDataLength, pBuffer + iBufferOffset, iPackageLength + PACKAGE_HEAD_LENGTH - pNet->iDataLength);
+			iBufferOffset += iPackageLength + PACKAGE_HEAD_LENGTH - pNet->iDataLength;
 			pNet->iDataLength = 0;
 
-			lua_getglobal(pNet->pLuaState, "_G");
-			if (lua_istable(pNet->pLuaState, -1))
-			{
-				lua_getfield(pNet->pLuaState, -1, pNet->pNetCallback);
-				if (lua_isfunction(pNet->pLuaState, -1))
-				{
-					lua_pushlstring(pNet->pLuaState, pNet->pDataBuffer + PACKAGE_HEAD_LENGTH, iPackageLength - PACKAGE_HEAD_LENGTH);
-					lua_pcall(pNet->pLuaState, 1, 0, 0);
-				}
-			}
+            lua_getglobal(pNet->pLuaState, "_G");
+            if (lua_istable(pNet->pLuaState, -1))
+            {
+                lua_getfield(pNet->pLuaState, -1, pNet->pNetCallback);
+                if (lua_isfunction(pNet->pLuaState, -1))
+                {
+                    lua_pushlstring(pNet->pLuaState, pNet->pDataBuffer + PACKAGE_HEAD_LENGTH, iPackageLength);
+                    lua_pcall(pNet->pLuaState, 1, 0, 0);
+                }
+            }
 		}
 	}
 }
